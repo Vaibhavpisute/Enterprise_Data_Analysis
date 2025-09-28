@@ -251,56 +251,12 @@ spark = SparkSession.builder \
 - **Null Value Counts**: Automated checking across all columns
 - **Record Counts**: Validation of data volume at each stage
 - **Schema Validation**: Ensure data types and structures are maintained
-
-### Pipeline Monitoring
-```python
-# Check data quality
-null_counts = result_df.select([
-    sum(col(c).isNull().cast("int")).alias(c) 
-    for c in result_df.columns
-])
-null_counts.show()
-
-# Verify data counts
-print(f"Total records processed: {result_df.count()}")
-```
-
-### Storage Monitoring
-```bash
-# Check HDFS storage usage
-hdfs dfs -du -h /user/hadoop/test_write_final_csv
-
-# Monitor Hive table statistics
-ANALYZE TABLE staging_db.final_table COMPUTE STATISTICS;
-```
-
+  
 ### Performance Monitoring
 - **Spark UI**: Monitor job execution and resource utilization
 - **YARN ResourceManager**: Track cluster resource usage
 - **Hive Metastore**: Monitor table metadata and statistics
 
-## 🎯 Key Business Insights Generated
-
-1. **Customer Analytics**
-   - Total quantity purchased per customer
-   - Average price paid per customer
-   - Customer purchase frequency and patterns
-
-2. **Product Performance**
-   - Products with meaningful sales volume (quantity >= 2)
-   - Category-wise product distribution
-   - Supplier performance metrics
-
-3. **Sales Trends**
-   - Year-over-year sales growth
-   - Monthly and daily sales patterns
-   - Seasonal purchasing behavior
-
-4. **Operational Insights**
-   - Order processing efficiency
-   - Customer lifetime value calculations
-   - Inventory turnover analysis
-
 ---
 
-**Built with ❤️ for scalable data analytics**
+
