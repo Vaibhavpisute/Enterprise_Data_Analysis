@@ -1,262 +1,131 @@
-# 🏥 Health Data Pipeline
+# Enterprise Sales Data Pipeline on AWS
 
-[![Apache Spark](https://img.shields.io/badge/Apache%20Spark-FDEE21?style=flat-square&logo=apachespark&logoColor=black)](https://spark.apache.org/)
-[![AWS](https://img.shields.io/badge/AWS-%23FF9900.svg?style=flat-square&logo=amazon-aws&logoColor=white)](https://aws.amazon.com/)
-[![Python](https://img.shields.io/badge/python-3670A0?style=flat-square&logo=python&logoColor=ffdd54)](https://www.python.org/)
-[![PostgreSQL](https://img.shields.io/badge/postgres-%23316192.svg?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
-[![Apache Hive](https://img.shields.io/badge/Apache%20Hive-FDEE21?style=flat-square&logo=apachehive&logoColor=black)](https://hive.apache.org/)
+## Demo
 
-A comprehensive big data analytics solution for healthcare and e-commerce data processing, designed to analyze customer orders, product trends, and sales patterns at scale using distributed computing technologies.
+Watch the pipeline run end to end:
 
-## 📋 Table of Contents
+## Overview
 
-- [Overview](#overview)
-- [Architecture](#architecture)
-- [Features](#features)
-- [Tech Stack](#tech-stack)
-- [Prerequisites](#prerequisites)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Data Pipeline Flow](#data-pipeline-flow)
-- [Project Structure](#project-structure)
-- [Configuration](#configuration)
-- [Monitoring](#monitoring)
+An online shop stores its sales in a PostgreSQL database: customers, orders, order items, products, categories and suppliers in six separate tables. To answer business questions such as "how much did each customer buy per year?" or "who are our top customers?", the data has to be joined, cleaned and summarised.
 
-## 🔍 Overview
+This project is a batch data pipeline on AWS that does this. It was built and run on AWS in 2025. The pipeline:
 
-This project implements a robust, scalable data pipeline architecture for processing customer order data and generating business insights. Built on AWS cloud infrastructure with Apache Spark and Hive, it processes large-scale transactional data to provide comprehensive analytics on customer behavior, product performance, and sales trends.
+1. reads the six tables from PostgreSQL on Amazon RDS with PySpark,
+2. joins them, filters and enriches the order lines (total price, upper-case customer name, date parts, window functions),
+3. writes the result to HDFS as CSV files,
+4. loads the files into Hive: a staging table, a de-duplicated final table, a yearly sales summary per customer, and a customer sales ranking built with window functions.
 
-### Key Objectives
-
-- **Sales Analytics**: Analyze customer purchasing patterns and product performance
-- **Data Integration**: Seamlessly integrate data from multiple business entities (customers, orders, products, suppliers)
-- **Business Intelligence**: Generate yearly sales reports and customer insights
-- **Data Quality**: Ensure data integrity through comprehensive validation and deduplication
-- **Scalability**: Handle large volumes of transactional data efficiently
-- **Automation**: Provide end-to-end automated data processing workflows
-
-## 🏗️ Architecture
+## Architecture
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│ PostgreSQL RDS  │───▶│   Apache Spark  │───▶│      HDFS       │
-│  (Source Data)  │    │ (ETL Processing)│    │ (Data Storage)  │
-│   - Customers   │    │   - PySpark     │    │  - Raw CSV      │
-│   - Orders      │    │   - DataFrames  │    │  - Processed    │
-│   - Products    │    │   - Window Funcs│    │                 │
-│   - Categories  │    │   - Aggregations│    │                 │
-│   - Suppliers   │    └─────────────────┘    └─────────────────┘
-└─────────────────┘                                    │
-                                                       ▼
-                            ┌─────────────────┐    ┌─────────────────┐
-                            │   Apache Hive   │◀───│   Data Mart     │
-                            │ - Staging Table │    │ - Final Table   │
-                            │ - Final Table   │    │ - Business      │
-                            │ - Sales Summary │    │   Analytics     │
-                            └─────────────────┘    └─────────────────┘
+ +----------------------+     +--------------------------------+     +---------------------+
+ |  PostgreSQL          |     |  PySpark on YARN               |     |  HDFS               |
+ |  on Amazon RDS       |JDBC |  rds_to_hdfs.py                |     |  CSV files          |
+ |  6 tables            |---->|  joins, filter, UDF,           |---->|  sales detail       |
+ |  (Customers, Orders, |     |  window functions, aggregation |     |  customer totals    |
+ |  Order_Items,        |     +--------------------------------+     +----------+----------+
+ |  Products,           |                                                        |
+ |  Categories,         |                                                        v
+ |  Suppliers)          |                              +-----------------------------------------+
+ +----------------------+                              |  Apache Hive (Spark SQL)                |
+                                                       |  hdfs_to_hive.py, database staging_db   |
+                                                       |                                         |
+                                                       |  staging_table (external, on HDFS)      |
+                                                       |        |  SELECT DISTINCT               |
+                                                       |        v                                |
+                                                       |  final_table                            |
+                                                       |        |-> customer_yearly_sales        |
+                                                       |        '-> customer_sales_ranking       |
+                                                       +-----------------------------------------+
 ```
 
-## ✨ Features
+## Tech Stack
 
-### Data Processing
-- **Multi-Table ETL**: Extract data from 6 related PostgreSQL tables (Customers, Orders, Order_Items, Products, Categories, Suppliers)
-- **Advanced Joins**: Complex inner joins across multiple tables for comprehensive data integration
-- **Data Transformation**: Column renaming, filtering, calculated fields (total_price = quantity × price)
-- **Window Functions**: Row numbering, ranking, cumulative calculations, and lag/lead operations
-- **UDF Applications**: Custom transformations like uppercase customer names
+| Area | Tools |
+|---|---|
+| Processing | PySpark (DataFrame API, window functions, UDF), Spark SQL |
+| Data warehouse | Apache Hive (external and managed tables) |
+| Storage | HDFS (CSV files) |
+| Cloud | AWS: PostgreSQL on Amazon RDS, Spark on YARN |
+| Source database | PostgreSQL (JDBC) |
+| Language | Python, SQL |
 
-### Analytics & Insights
-- **Sales Analysis**: Customer-wise total quantities and average prices
-- **Date Analytics**: Extract year, month, day components for time-series analysis
-- **Customer Segmentation**: Ranking customers by order frequency and purchase behavior
-- **Product Performance**: Filter products with quantity >= 2 for meaningful analysis
-- **Trend Analysis**: Year-over-year sales comparisons and growth metrics
+## Pipeline Steps and Transformations
 
-### Data Quality & Operations
-- **Deduplication**: Remove duplicate records using DISTINCT operations
-- **Null Handling**: Fill missing values for price and total_price columns
-- **Data Validation**: Count null values across all columns for quality assessment
-- **Partitioning**: Optimize data storage with 5-way partitioning
-- **Schema Management**: Automated table creation and schema validation
+**Step 1 - `rds_to_hdfs.py` (with the `DataPipeline` class in `main1.py`)**
+- Reads Customers, Orders, Order_Items, Products, Categories and Suppliers over JDBC.
+- Joins all six tables (inner joins on customer, order, product, category and supplier IDs).
+- Keeps order lines with `quantity >= 2` and adds `total_price = quantity * price`.
+- Fills null prices, sorts by order date, and adds an upper-case customer name with a UDF (NULL-safe).
+- Adds `order_year`, `order_month` and `order_day`.
+- Applies window functions per customer: `row_number`, `rank`, `dense_rank`, cumulative `sum`, `lag` and `lead`.
+- Aggregates per customer (total quantity, average price), repartitions to 5 partitions and counts null values per column.
+- Writes two CSV outputs to HDFS: the order-line detail (6 columns, no header line) for the Hive staging table, and the customer totals.
 
-## 🛠️ Tech Stack
+**Step 2 - `hdfs_to_hive.py`**
+- Creates the Hive database `staging_db` and an external `staging_table` on the HDFS detail files (`customer, order_date, product_name, quantity, price, total_price`).
+- Builds `final_table` with `SELECT DISTINCT`.
+- Builds `customer_yearly_sales`: per customer and year, `SUM(quantity)`, `SUM(total_price)`, `COUNT(*)` and `AVG(price)`.
+- Builds `customer_sales_ranking` with window functions: `RANK` and `DENSE_RANK` over the customer's total sales, `ROW_NUMBER` per customer, and `LAG` / `LEAD` for the previous and next order value.
+- Fails the job when a table is empty or a step raises an error, instead of only printing a message.
 
-### Big Data & Processing
-- **Apache Spark 3.x**: Distributed data processing engine
-- **PySpark**: Python API for Spark with advanced transformations
-- **Apache Hive**: Data warehouse for SQL-based analytics
-- **HDFS**: Hadoop Distributed File System for scalable storage
+## Output Tables
 
-### Database & Storage
-- **PostgreSQL**: Source relational database on AWS RDS
-- **AWS RDS**: Managed database service
-- **CSV Storage**: Structured data export format
+Row counts for the sample data in `sql_whole_ddl.sql` (100 rows in each of the six source tables, orders from 2023):
 
-### Data Processing Libraries
-- **Spark SQL**: For complex queries and aggregations
-- **Window Functions**: Advanced analytics operations
-- **UDFs**: Custom user-defined functions
-- **DataFrame API**: High-level data manipulation
+| Table | Rows | Content |
+|---|---:|---|
+| `staging_table` | 80 | Order lines with `quantity >= 2` |
+| `final_table` | 80 | The same rows without duplicates |
+| `customer_yearly_sales` | 80 | One row per customer and year |
+| `customer_sales_ranking` | 80 | One row per order line, with rank, previous and next order value |
 
-## 📋 Prerequisites
+Sample of `customer_yearly_sales`:
 
-- Python 3.8+
-- Apache Spark 3.2+
-- PostgreSQL JDBC Driver
-- AWS CLI configured with appropriate permissions
-- Hadoop ecosystem (HDFS, Hive) properly configured
-- Network access to PostgreSQL RDS instance
+| customer | order_year | total_quantity | total_sales | order_count | average_price |
+|---|---:|---:|---:|---:|---:|
+| Amy Collins | 2023 | 5 | 290.00 | 1 | 58.00 |
+| Angela Sanchez | 2023 | 2 | 58.00 | 1 | 29.00 |
+| Anna Peterson | 2023 | 3 | 126.00 | 1 | 42.00 |
 
-### Required Python Packages
+Top of `customer_sales_ranking`:
+
+| customer | order_date | total_price | customer_total_sales | sales_rank |
+|---|---|---:|---:|---:|
+| Dorothy Hayes | 2023-04-08 | 340.00 | 340.00 | 1 |
+| Michelle Bryant | 2023-04-03 | 335.00 | 335.00 | 2 |
+| Donna Washington | 2023-03-29 | 330.00 | 330.00 | 3 |
+
+Each customer has one order in the sample data, so `prev_order_value` and `next_order_value` are NULL there.
+
+## Project Structure
+
 ```
-pyspark>=3.2.0
-py4j
-psycopg2-binary (for PostgreSQL connectivity)
+Enterprise_Data_Analysis/
+├── main1.py            # DataPipeline class: starts Spark, reads a table over JDBC
+├── rds_to_hdfs.py      # Reads, joins and transforms; writes CSV to HDFS
+├── hdfs_to_hive.py     # Creates the Hive staging, final, yearly sales and ranking tables
+├── sql_whole_ddl.sql   # Creates and fills the 6 source tables (100 rows each)
+├── .env.example        # Names of the environment variables (no real values)
+├── .gitignore
+├── local_demo/         # Local version (see the last section)
+└── README.md
 ```
 
-### AWS/Database Permissions Required
-- RDS: Read access to PostgreSQL database
-- S3/HDFS: Read/Write access for data storage
-- Network: Security group access to RDS instance
+### Configuration
 
-## 🚀 Installation
+The database host, user and password are not stored in the code. `rds_to_hdfs.py` reads them from the environment variables `POSTGRES_HOST`, `POSTGRES_PORT`, `SOURCE_DB`, `POSTGRES_USER` and `POSTGRES_PASSWORD`. See `.env.example`.
 
-### 1. Clone the Repository
+### Run on AWS
+
 ```bash
-git clone https://github.com/yourusername/health_data_pipeline.git
-cd health_data_pipeline
-```
-
-### 2. Configure Database Connection
-Update the connection parameters in `rds_to_hdfs.py`:
-```python
-host = "jdbc:postgresql://your-database-endpoint:5432/your_database"
-user = "your_username"
-pwd = "your_password"
-driver = "org.postgresql.Driver"
-```
-
-### 3. Set Up HDFS Path
-Ensure HDFS directory exists:
-```bash
-hdfs dfs -mkdir -p /user/hadoop/test_write_final_csv
-```
-
-### 4. Start Spark Session
-```bash
+# 1. Run sql_whole_ddl.sql in your PostgreSQL database
+# 2. Set the variables from .env.example, then submit the two jobs
 spark-submit --jars /path/to/postgresql-jdbc.jar rds_to_hdfs.py
+spark-submit hdfs_to_hive.py
 ```
 
-## 💻 Usage
+## Local demo (Docker)
 
-### 1. Run Data Extraction and Processing
-```bash
-# Execute the main ETL pipeline
-python rds_to_hdfs.py
-```
-
-### 2. Create Hive Tables
-```bash
-# Run Hive table creation
-python hdfs_to_hive.py
-```
-
-### 3. Verify Results
-```bash
-# Check HDFS output
-hdfs dfs -ls /user/hadoop/test_write_final_csv
-
-# Query Hive tables
-beeline -u jdbc:hive2://localhost:10000
-> USE staging_db;
-> SELECT * FROM customer_yearly_sales LIMIT 10;
-```
-
-## 🔄 Data Pipeline Flow
-
-### 1. Data Extraction Phase
-- Connect to PostgreSQL RDS database
-- Extract data from 6 source tables:
-  - **Customers**: Customer information and contact details
-  - **Orders**: Order transactions with dates
-  - **Order_Items**: Product quantities and prices per order
-  - **Products**: Product catalog with categories and suppliers
-  - **Categories**: Product categorization
-  - **Suppliers**: Supplier information
-
-### 2. Data Transformation Phase
-- **Multi-table Joins**: Create comprehensive dataset by joining all tables
-- **Data Filtering**: Apply business rules (quantity >= 2)
-- **Calculated Fields**: Generate total_price = quantity × price
-- **Date Operations**: Extract year, month, day components
-- **Window Analytics**: Apply ranking, cumulative sums, lag/lead operations
-- **Data Cleaning**: Handle null values and apply UDFs
-
-### 3. Data Aggregation Phase
-- **Customer Analytics**: Group by customer for total quantities and average prices
-- **Business Metrics**: Calculate percentages and cumulative statistics
-- **Data Quality Checks**: Count null values across all columns
-- **Partitioning**: Optimize data layout with 5-way partitioning
-
-### 4. Data Storage Phase
-- **HDFS Storage**: Write processed data as CSV to HDFS
-- **Hive Integration**: Create external tables pointing to HDFS data
-- **Data Mart Creation**: Build final analytical tables
-- **Business Tables**: Generate customer yearly sales summaries
-
-## 📁 Project Structure
-
-```
-health_data_pipeline/
-├── src/
-│   ├── main1.py                # DataPipeline class for database connections
-│   ├── rds_to_hdfs.py         # Main ETL pipeline script
-│   └── hdfs_to_hive.py        # Hive table creation and management
-├── sql/
-│   └── sql_whole_ddl.sql      # Database schema and sample data            
-└── README.md                 # This file
-```
-
-## ⚙️ Configuration
-
-### Database Configuration
-Edit connection parameters in your scripts:
-```python
-# PostgreSQL RDS Connection
-JDBC_URL = "jdbc:postgresql://database-endpoint:5432/database_name"
-USERNAME = "your_username"
-PASSWORD = "your_password"
-DRIVER = "org.postgresql.Driver"
-```
-
-### HDFS Configuration
-```python
-# HDFS Storage Path
-HDFS_OUTPUT_PATH = "hdfs:///user/hadoop/test_write_final_csv"
-```
-
-### Spark Configuration
-```python
-# Spark Session Configuration
-spark = SparkSession.builder \
-    .appName("RDS_to_HDFS_Pipeline") \
-    .master("yarn") \
-    .enableHiveSupport() \
-    .getOrCreate()
-```
-
-## 📊 Monitoring
-
-### Data Quality Monitoring
-- **Null Value Counts**: Automated checking across all columns
-- **Record Counts**: Validation of data volume at each stage
-- **Schema Validation**: Ensure data types and structures are maintained
-  
-### Performance Monitoring
-- **Spark UI**: Monitor job execution and resource utilization
-- **YARN ResourceManager**: Track cluster resource usage
-- **Hive Metastore**: Monitor table metadata and statistics
-
----
-
-
+The pipeline was originally built and run on AWS. After the AWS free tier ended, I created a local version with Docker Compose to keep it runnable for demos: MinIO stands in for HDFS, PostgreSQL stands in for RDS, and Spark runs inside Airflow in local mode. See [`local_demo/README.md`](local_demo/README.md) for steps.
+The local demo adds synthetic sample orders for testing.
