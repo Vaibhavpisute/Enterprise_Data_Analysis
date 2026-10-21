@@ -1,5 +1,7 @@
 # Enterprise Sales Data Pipeline on AWS
 
+> **Part 2 of this project:** [Ecommerce_Sales_Analytics](https://github.com/Vaibhavpisute/Ecommerce_Sales_Analytics) runs the public Olist e-commerce dataset through this pipeline stack (PostgreSQL, PySpark, MinIO and Hive) and analyses it with SQL, Python, Excel and Power BI.
+
 ## Demo
 
 Watch the pipeline run end to end:
