@@ -1,0 +1,100 @@
+# Local demo of the Enterprise Sales Data Pipeline. All settings come from .env.
+# Rough RAM use: Postgres ~0.1 GB, MinIO ~0.2 GB, Airflow + Spark ~2.5 GB.
+name: sales-demo
+
+services:
+  # Replaces Amazon RDS (source database "sales_db")
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set it in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set it in .env}
+      POSTGRES_DB: ${SOURCE_DB:?set it in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Runs once, on the first start (empty volume): creates and fills the 6 tables
+      - ./sql/sql_whole_ddl.sql:/docker-entrypoint-initdb.d/01_sql_whole_ddl.sql:ro
+      # Synthetic sample orders, loaded right after the file above
+      - ./sql/02_extra_sample_orders.sql:/docker-entrypoint-initdb.d/02_extra_sample_orders.sql:ro
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 512m
+
+  # Replaces HDFS (S3-compatible storage; Chainguard build because minio/minio is no longer published)
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    restart: unless-stopped
+    user: "0:0"
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set it in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set it in .env}
+    volumes:
+      - miniodata:/data
+    ports:
+      - "127.0.0.1:${MINIO_API_HOST_PORT:-9010}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-9011}:9001"
+    mem_limit: 512m
+
+  # Creates the bucket, then exits. It retries until MinIO is ready.
+  minio-init:
+    image: cgr.dev/chainguard/minio-client:latest
+    restart: on-failure
+    depends_on:
+      - minio
+    environment:
+      MC_HOST_local: http://${MINIO_ROOT_USER}:${MINIO_ROOT_PASSWORD}@minio:9000
+    command: ["mb", "--ignore-existing", "local/${MINIO_BUCKET:?set it in .env}"]
+
+  # Airflow (standalone) + Java + PySpark. Spark runs in local mode, with its own local Hive metastore.
+  # The image is the one built for the health project. If it is missing, Docker builds it from docker/airflow.
+  airflow:
+    build:
+      context: ./docker/airflow
+    image: health-demo-airflow:local
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "False"
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////opt/airflow/state/airflow.db
+      AIRFLOW__LOGGING__BASE_LOG_FOLDER: /opt/airflow/state/logs
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:?set it in .env}
+      AIRFLOW__WEBSERVER__WORKERS: "1"
+      AIRFLOW__SCHEDULER__PARSING_PROCESSES: "1"
+      # S3A reads these (MinIO login). Region is only a dummy value for the AWS SDK.
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_REGION: us-east-1
+    command: ["bash", "/opt/airflow/entrypoint-local.sh"]
+    volumes:
+      - ./dags:/opt/airflow/dags:ro
+      - ./spark_jobs:/opt/airflow/spark_jobs:ro
+      - ./scripts:/opt/airflow/scripts:ro
+      - airflow_state:/opt/airflow/state
+      - spark_data:/opt/spark-data
+    ports:
+      - "127.0.0.1:${AIRFLOW_HOST_PORT:-8081}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+    mem_limit: 4g
+
+volumes:
+  pgdata:
+  miniodata:
+  airflow_state:
+  spark_data:

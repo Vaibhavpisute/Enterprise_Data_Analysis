@@ -1,0 +1,7 @@
+.env
+*.pyc
+__pycache__/
+
+# Demo video: temporary files (the finished videos in video_output/ are kept)
+video_tools/.terminal_done*
+video_output/_work/
