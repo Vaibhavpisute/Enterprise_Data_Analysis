@@ -67,6 +67,10 @@ result_df = full_df.select("customer_name", "order_date", "product_name", "quant
 print("Filtered and selected DataFrame:")
 result_df.show()
 
+# These 6 columns are what the Hive staging table (hdfs_to_hive.py) expects.
+# Writing only the customer totals to that location made the staging table not match the files.
+detail_df = result_df
+
 # Sort and group the DataFrame
 result_df = result_df.orderBy(col("order_date").desc())
 
@@ -74,7 +78,8 @@ result_df = result_df.orderBy(col("order_date").desc())
 result_df = result_df.fillna({'price': 0, 'total_price': 0})
 
 # Define UDF and apply it
-upper_case_udf = udf(lambda name: name.upper(), StringType())
+# A NULL customer name would make name.upper() crash the Spark task, so it is handled here.
+upper_case_udf = udf(lambda name: name.upper() if name is not None else None, StringType())
 result_df = result_df.withColumn("upper_customer_name", upper_case_udf(col("customer")))
 
 # Extract date components
@@ -116,15 +121,21 @@ null_counts = result_df.select([sum(col(c).isNull().cast("int")).alias(c) for c 
 null_counts.show()
 
 
-# Define HDFS path
-hdfs_path = "hdfs:///user/hadoop/test_write_final_csv"
+# Define HDFS paths
+detail_path = "hdfs:///user/hadoop/test_write_final_csv"   # input of the Hive staging table
+totals_path = "hdfs:///user/hadoop/customer_totals_csv"    # customer totals
 
-# Write DataFrame to HDFS
+# Write DataFrames to HDFS
+# The detail files have no header line: the Hive staging table does not skip it, so a header
+# would be loaded as an extra row of NULLs.
 try:
-    result_df.write.option("header", "true").option("delimiter", ",").mode("overwrite").csv(hdfs_path)
-    print("DataFrame written to HDFS successfully")
+    detail_df.write.option("header", "false").option("delimiter", ",").mode("overwrite").csv(detail_path)
+    print(f"Sales detail written to {detail_path}")
+    result_df.write.option("header", "true").option("delimiter", ",").mode("overwrite").csv(totals_path)
+    print(f"Customer totals written to {totals_path}")
 except Exception as e:
     print(f"Error writing DataFrame to HDFS: {e}")
+    raise
 
 #df.write.option("header", "true").option("delimiter", ",").mode("overwrite").csv(hdfs_path)
 # Write DataFrame to CSV df.write.mode("overwrite").csv(hdfs_path)

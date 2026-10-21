@@ -52,7 +52,7 @@ def create_database_and_tables():
 
         # Remove duplicates and create final table
         if table_is_empty("staging_table"):
-            print("staging_table is empty. Skipping final_table creation.")
+            raise RuntimeError("staging_table is empty. Nothing to load into final_table.")
         else:
             spark.sql("""
                 CREATE TABLE IF NOT EXISTS final_table AS
@@ -66,7 +66,7 @@ def create_database_and_tables():
 
         # Example business logic: Calculate total sales by customer and year and store in a final table
         if table_is_empty("final_table"):
-            print("final_table is empty. Skipping customer_yearly_sales creation.")
+            raise RuntimeError("final_table is empty. Nothing to build customer_yearly_sales from.")
         else:
             spark.sql("""
                 CREATE TABLE IF NOT EXISTS customer_yearly_sales AS
@@ -85,6 +85,7 @@ def create_database_and_tables():
 
     except Exception as e:
         print(f"Error creating database and tables: {e}")
+        raise
 
 # Call the function to create database and tables
 create_database_and_tables()
