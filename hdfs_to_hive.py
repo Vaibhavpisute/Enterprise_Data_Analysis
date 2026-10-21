@@ -68,13 +68,17 @@ def create_database_and_tables():
         if table_is_empty("final_table"):
             raise RuntimeError("final_table is empty. Nothing to build customer_yearly_sales from.")
         else:
+            # total_quantity = SUM(quantity), total_sales = SUM(total_price) (the sales value),
+            # order_count = number of order lines. Before, total_sales was SUM(quantity).
             spark.sql("""
                 CREATE TABLE IF NOT EXISTS customer_yearly_sales AS
                 SELECT 
                     customer,
                     year(order_date) AS order_year,
-                    SUM(quantity) AS total_sales,
-                    AVG(price) AS average_price
+                    SUM(quantity) AS total_quantity,
+                    ROUND(SUM(total_price), 2) AS total_sales,
+                    COUNT(*) AS order_count,
+                    ROUND(AVG(price), 2) AS average_price
                 FROM 
                     final_table
                 GROUP BY 
