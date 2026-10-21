@@ -4,6 +4,11 @@
 
 Watch the pipeline run end to end:
 
+
+https://github.com/user-attachments/assets/f15b00ce-6ab3-4714-9baa-94ef3cdee827
+
+
+
 ## Overview
 
 An online shop stores its sales in a PostgreSQL database: customers, orders, order items, products, categories and suppliers in six separate tables. To answer business questions such as "how much did each customer buy per year?" or "who are our top customers?", the data has to be joined, cleaned and summarised.
