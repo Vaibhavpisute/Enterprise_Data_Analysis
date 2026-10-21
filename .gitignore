@@ -1,0 +1,25 @@
+# Secrets and local data - never commit
+.env
+*.pyc
+__pycache__/
+
+# Local Spark / Hive files
+metastore_db/
+spark-warehouse/
+derby.log
+
+# Python environments
+venv/
+.venv/
+
+# Demo video tools and output (the video is added through the GitHub website)
+video_tools/
+video_output/
+_work/
+*.mp4
+*.gif
+
+# Local notes
+INSTALL_LOG.md
+CHANGES_REPORT.md
+DEMO_SCRIPT.md

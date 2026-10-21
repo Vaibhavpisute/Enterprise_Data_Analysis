@@ -1,3 +1,5 @@
+import os
+
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, lit, sum, avg, year, month, dayofmonth
 from pyspark.sql.window import Window
@@ -9,9 +11,10 @@ from main1 import DataPipeline
 spark = SparkSession.builder.appName("Rds_to_hdfs").master("yarn").enableHiveSupport().getOrCreate()
 
 # JDBC connection properties
-host = "jdbc:postgresql://database-1.cpyaoguwudqo.ap-south-1.rds.amazonaws.com:5432/health_db"
-user = "postgres"
-pwd = "mypostgreypassword"
+# Connection settings come from environment variables (see .env.example)
+host = f"jdbc:postgresql://{os.environ.get('POSTGRES_HOST')}:{os.environ.get('POSTGRES_PORT', '5432')}/{os.environ.get('SOURCE_DB', 'health_db')}"
+user = os.environ.get("POSTGRES_USER")
+pwd = os.environ.get("POSTGRES_PASSWORD")
 driver = "org.postgresql.Driver"
 
 # Instantiate DataPipeline class
