@@ -71,32 +71,30 @@ This project is a batch data pipeline on AWS that does this. It was built and ru
 
 ## Output Tables
 
-Row counts for the sample data in `sql_whole_ddl.sql` (100 rows in each of the six source tables, orders from 2023):
+Row counts from a real run of the pipeline, read with `check_results.py --counts`. The run used 500 orders: the 100 orders of `sql_whole_ddl.sql` plus 400 synthetic orders from the local demo (the 100 original orders alone give fewer rows). Only order lines with `quantity >= 2` are kept, 414 of the 500.
 
 | Table | Rows | Content |
 |---|---:|---|
-| `staging_table` | 80 | Order lines with `quantity >= 2` |
-| `final_table` | 80 | The same rows without duplicates |
-| `customer_yearly_sales` | 80 | One row per customer and year |
-| `customer_sales_ranking` | 80 | One row per order line, with rank, previous and next order value |
+| `staging_table` | 414 | Order lines with `quantity >= 2` |
+| `final_table` | 414 | The same rows without duplicates |
+| `customer_yearly_sales` | 179 | One row per customer and year |
+| `customer_sales_ranking` | 414 | One row per order line, with rank, previous and next order value |
 
 Sample of `customer_yearly_sales`:
 
 | customer | order_year | total_quantity | total_sales | order_count | average_price |
 |---|---:|---:|---:|---:|---:|
-| Amy Collins | 2023 | 5 | 290.00 | 1 | 58.00 |
-| Angela Sanchez | 2023 | 2 | 58.00 | 1 | 29.00 |
-| Anna Peterson | 2023 | 3 | 126.00 | 1 | 42.00 |
+| Raymond Watson | 2023 | 2 | 66.00 | 1 | 33.00 |
+| Anthony Diaz | 2023 | 4 | 232.00 | 1 | 58.00 |
+| Angela Sanchez | 2023 | 8 | 347.94 | 3 | 44.28 |
 
-Top of `customer_sales_ranking`:
+Top of `customer_sales_ranking` (the first customer in the ranking, one row per order):
 
-| customer | order_date | total_price | customer_total_sales | sales_rank |
-|---|---|---:|---:|---:|
-| Dorothy Hayes | 2023-04-08 | 340.00 | 340.00 | 1 |
-| Michelle Bryant | 2023-04-03 | 335.00 | 335.00 | 2 |
-| Donna Washington | 2023-03-29 | 330.00 | 330.00 | 3 |
-
-Each customer has one order in the sample data, so `prev_order_value` and `next_order_value` are NULL there.
+| customer | order_date | total_price | customer_total_sales | sales_rank | order_row_num | prev_order_value | next_order_value |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Jessica Turner | 2023-01-14 | 41.00 | 1175.91 | 1 | 1 | NULL | 188.00 |
+| Jessica Turner | 2023-02-11 | 188.00 | 1175.91 | 1 | 2 | 41.00 | 258.52 |
+| Jessica Turner | 2023-06-03 | 258.52 | 1175.91 | 1 | 3 | 188.00 | 299.35 |
 
 ## Project Structure
 
