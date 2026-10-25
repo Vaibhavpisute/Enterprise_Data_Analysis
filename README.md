@@ -24,27 +24,8 @@ This project is a batch data pipeline on AWS that does this. It was built and ru
 
 ## Architecture
 
-```
- +----------------------+     +--------------------------------+     +---------------------+
- |  PostgreSQL          |     |  PySpark on YARN               |     |  HDFS               |
- |  on Amazon RDS       |JDBC |  rds_to_hdfs.py                |     |  CSV files          |
- |  6 tables            |---->|  joins, filter, UDF,           |---->|  sales detail       |
- |  (Customers, Orders, |     |  window functions, aggregation |     |  customer totals    |
- |  Order_Items,        |     +--------------------------------+     +----------+----------+
- |  Products,           |                                                        |
- |  Categories,         |                                                        v
- |  Suppliers)          |                              +-----------------------------------------+
- +----------------------+                              |  Apache Hive (Spark SQL)                |
-                                                       |  hdfs_to_hive.py, database staging_db   |
-                                                       |                                         |
-                                                       |  staging_table (external, on HDFS)      |
-                                                       |        |  SELECT DISTINCT               |
-                                                       |        v                                |
-                                                       |  final_table                            |
-                                                       |        |-> customer_yearly_sales        |
-                                                       |        '-> customer_sales_ranking       |
-                                                       +-----------------------------------------+
-```
+<img width="1920" height="680" alt="architecture_sales_local" src="https://github.com/user-attachments/assets/02e5f309-4745-4d37-8aac-ed8552ed7ffb" />
+
 
 ## Tech Stack
 
