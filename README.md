@@ -1,5 +1,7 @@
 # Enterprise Sales Data Pipeline on AWS
 
+[![tests](https://github.com/Vaibhavpisute/Enterprise_Data_Analysis/actions/workflows/tests.yml/badge.svg)](https://github.com/Vaibhavpisute/Enterprise_Data_Analysis/actions/workflows/tests.yml)
+
 > **Part 2 of this project:** [Ecommerce_Sales_Analytics](https://github.com/Vaibhavpisute/Ecommerce_Sales_Analytics) runs the public Olist e-commerce dataset through this pipeline stack (PostgreSQL, PySpark, MinIO and Hive) and analyses it with SQL, Python, Excel and Power BI.
 
 ## Demo
@@ -55,6 +57,7 @@ This project is a batch data pipeline on AWS that does this. It was built and ru
 - Builds `final_table` with `SELECT DISTINCT`.
 - Builds `customer_yearly_sales`: per customer and year, `SUM(quantity)`, `SUM(total_price)`, `COUNT(*)` and `AVG(price)`.
 - Builds `customer_sales_ranking` with window functions: `RANK` and `DENSE_RANK` over the customer's total sales, `ROW_NUMBER` per customer, and `LAG` / `LEAD` for the previous and next order value.
+- Reconciles at the end: compares the order-line count and total sales between PostgreSQL and the Hive `staging_table` (overall and per customer) and fails the job if they differ. This step needs the same `POSTGRES_*` variables as step 1.
 - Fails the job when a table is empty or a step raises an error, instead of only printing a message.
 
 ## Output Tables
@@ -90,6 +93,8 @@ Top of `customer_sales_ranking` (the first customer in the ranking, one row per 
 Enterprise_Data_Analysis/
 ├── main1.py            # DataPipeline class: starts Spark, reads a table over JDBC
 ├── rds_to_hdfs.py      # Reads, joins and transforms; writes CSV to HDFS
+├── src/transformations.py  # Pure DataFrame functions used by the pipeline (tested)
+├── tests/              # pytest unit tests (local Spark, no database or Hive)
 ├── hdfs_to_hive.py     # Creates the Hive staging, final, yearly sales and ranking tables
 ├── sql_whole_ddl.sql   # Creates and fills the 6 source tables (100 rows each)
 ├── .env.example        # Names of the environment variables (no real values)
@@ -110,6 +115,19 @@ The database host, user and password are not stored in the code. `rds_to_hdfs.py
 spark-submit --jars /path/to/postgresql-jdbc.jar rds_to_hdfs.py
 spark-submit hdfs_to_hive.py
 ```
+
+## Testing
+
+The transformations live in `src/transformations.py` as small functions (DataFrames in, DataFrame out). The tests in `tests/` run them on a local Spark session with hand-made data. They do not connect to PostgreSQL, HDFS or Hive.
+
+You need Java 17 and Python 3.8-3.12.
+
+```bash
+pip install -r requirements-dev.txt
+pytest -q
+```
+
+GitHub Actions runs the same two commands on every push and pull request (`.github/workflows/tests.yml`).
 
 ## Local demo (Docker)
 

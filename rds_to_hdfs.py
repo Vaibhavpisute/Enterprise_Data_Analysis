@@ -1,11 +1,12 @@
 import os
 
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, lit, sum, avg, year, month, dayofmonth
-from pyspark.sql.window import Window
-from pyspark.sql.functions import row_number, rank, dense_rank, lag, lead, udf
-from pyspark.sql.types import StringType
+from pyspark.sql.functions import col
 from main1 import DataPipeline
+from src.transformations import (
+    add_date_parts, add_upper_customer_name, add_window_columns, build_order_lines,
+    count_nulls, customer_totals, handle_missing_values, join_sources,
+)
 
 # Initialize Spark session with Hive support
 spark = SparkSession.builder.appName("Rds_to_hdfs").master("yarn").enableHiveSupport().getOrCreate()
@@ -48,21 +49,14 @@ print("Suppliers DataFrame:")
 suppliers_df.show()
 
 # Perform joins
-full_df = orders_df.join(customers_df, orders_df.customer_id == customers_df.customer_id, "inner") \
-                   .join(order_items_df, orders_df.order_id == order_items_df.order_id, "inner") \
-                   .join(products_df, order_items_df.product_id == products_df.product_id, "inner") \
-                   .join(categories_df, products_df.category_id == categories_df.category_id, "inner") \
-                   .join(suppliers_df, products_df.supplier_id == suppliers_df.supplier_id, "inner")
+full_df = join_sources(customers_df, orders_df, order_items_df, products_df, categories_df, suppliers_df)
 
 print("Joined DataFrame:")
 full_df.show()
 
 #keep this
 # Select specific columns and rename as necessary
-result_df = full_df.select("customer_name", "order_date", "product_name", "quantity", "price") \
-                   .withColumnRenamed("customer_name", "customer") \
-                   .filter(col("quantity") >=2) \
-                   .withColumn("total_price", col("quantity") * col("price"))
+result_df = build_order_lines(full_df)
 
 print("Filtered and selected DataFrame:")
 result_df.show()
@@ -75,37 +69,19 @@ detail_df = result_df
 result_df = result_df.orderBy(col("order_date").desc())
 
 # Fill null values in `price` and `total_price`
-result_df = result_df.fillna({'price': 0, 'total_price': 0})
+result_df = handle_missing_values(result_df)
 
-# Define UDF and apply it
-# A NULL customer name would make name.upper() crash the Spark task, so it is handled here.
-upper_case_udf = udf(lambda name: name.upper() if name is not None else None, StringType())
-result_df = result_df.withColumn("upper_customer_name", upper_case_udf(col("customer")))
+# Upper-case customer name (UDF)
+result_df = add_upper_customer_name(result_df)
 
 # Extract date components
-result_df = result_df.withColumn("order_year", year("order_date")) \
-                     .withColumn("order_month", month("order_date")) \
-                     .withColumn("order_day", dayofmonth("order_date"))
+result_df = add_date_parts(result_df)
 
-# Window specification for various window functions
-window_spec = Window.partitionBy("customer").orderBy("order_date")
-
-# Apply window functions
-result_df = result_df.withColumn("row_num", row_number().over(window_spec)) \
-                     .withColumn("rank", rank().over(window_spec)) \
-                     .withColumn("dense_rank", dense_rank().over(window_spec)) \
-                     .withColumn("cumulative_sum", sum("quantity").over(window_spec)) \
-                     .withColumn("lag_quantity", lag("quantity", 1).over(window_spec)) \
-                     .withColumn("lead_quantity", lead("quantity", 1).over(window_spec))
-
-# Calculate percentage
-result_df = result_df.withColumn("percentage", (col("quantity") / sum("quantity").over(window_spec)) * 100)
+# Window functions and percentage
+result_df = add_window_columns(result_df)
 
 # Aggregate multiple columns
-result_df = result_df.groupBy("customer").agg(
-    sum("quantity").alias("total_quantity"),
-    avg("price").alias("avg_price")
-)
+result_df = customer_totals(result_df)
 
 print("Final DataFrame Created Successfully")
 
@@ -116,7 +92,7 @@ result_df = result_df.repartition(5)
 result_df.show()
 
 # Count null values in each column 
-null_counts = result_df.select([sum(col(c).isNull().cast("int")).alias(c) for c in result_df.columns]) 
+null_counts = count_nulls(result_df)
 # Show the result 
 null_counts.show()
 

@@ -1,7 +1,8 @@
+import os
+
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, sum, rank, dense_rank, row_number, lag, lead
-from pyspark.sql.functions import round as spark_round
-from pyspark.sql.window import Window
+from main1 import DataPipeline
+from src.transformations import build_order_lines, check_reconciliation, join_sources, rank_customers
 
 # Initialize Spark session with Hive support
 spark = SparkSession.builder.appName("Rds_to_hdfs").master("yarn").enableHiveSupport().getOrCreate()
@@ -107,11 +108,7 @@ def build_customer_sales_ranking():
         if table_is_empty("final_table"):
             raise RuntimeError("final_table is empty. Nothing to build customer_sales_ranking from.")
 
-        customer_window = Window.partitionBy("customer").orderBy("order_date")
-        ranking_window = Window.orderBy(col("customer_total_sales").desc())
-
-        ranking_df = spark.table("final_table")             .withColumn("customer_total_sales", spark_round(sum("total_price").over(Window.partitionBy("customer")), 2))             .withColumn("sales_rank", rank().over(ranking_window))             .withColumn("sales_dense_rank", dense_rank().over(ranking_window))             .withColumn("order_row_num", row_number().over(customer_window))             .withColumn("prev_order_value", spark_round(lag("total_price", 1).over(customer_window), 2))             .withColumn("next_order_value", spark_round(lead("total_price", 1).over(customer_window), 2))             .select("customer", "order_date", "total_price", "customer_total_sales", "sales_rank",
-                    "sales_dense_rank", "order_row_num", "prev_order_value", "next_order_value")             .orderBy("sales_rank", "customer", "order_date")
+        ranking_df = rank_customers(spark.table("final_table")).orderBy("sales_rank", "customer", "order_date")
 
         ranking_df.write.mode("overwrite").saveAsTable("customer_sales_ranking")
         print("customer_sales_ranking created successfully")
@@ -121,6 +118,29 @@ def build_customer_sales_ranking():
         raise
 
 
+def reconcile_source_with_hive():
+    """Last step: PostgreSQL source vs the loaded Hive data.
+
+    Compares the number of order lines and the total sales amount (and the same per customer).
+    Raises an error when they differ, so the job fails instead of finishing with wrong data.
+    """
+    host = f"jdbc:postgresql://{os.environ.get('POSTGRES_HOST')}:{os.environ.get('POSTGRES_PORT', '5432')}/{os.environ.get('SOURCE_DB', 'health_db')}"
+    pipeline = DataPipeline(host, os.environ.get("POSTGRES_USER"), os.environ.get("POSTGRES_PASSWORD"),
+                            "org.postgresql.Driver")
+    source_lines = build_order_lines(join_sources(
+        pipeline.fetch_data_from_sql("Customers"),
+        pipeline.fetch_data_from_sql("Orders"),
+        pipeline.fetch_data_from_sql("order_items"),
+        pipeline.fetch_data_from_sql("Products"),
+        pipeline.fetch_data_from_sql("Categories"),
+        pipeline.fetch_data_from_sql("Suppliers"),
+    )).select("customer", "total_price")
+    # staging_table holds every loaded order line (final_table drops duplicate lines on purpose)
+    hive_lines = spark.table("staging_db.staging_table").select("customer", "total_price")
+    check_reconciliation(source_lines, hive_lines)
+
+
 # Call the functions to create the databases and tables
 create_database_and_tables()
 build_customer_sales_ranking()
+reconcile_source_with_hive()
